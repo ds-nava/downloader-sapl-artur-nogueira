@@ -10,17 +10,12 @@ Ferramenta simples para baixar e unificar documentos em PDF do portal SAPL da CÃ
 
 2.  **Instale as dependÃªncias:**
     * Abra o terminal na pasta do projeto e execute o comando:
-        ```bash
-        pip install -r requirements.txt
-        ```
-
+       pip install -r requirements.txt
+       
 3.  **Execute o programa:**
     * Ainda no terminal, execute:
-        ```bash
-        guipdfsapl.py
-        ```
-    *(Lembre-se de substituir `seu_script.py` pelo nome real do seu arquivo)*.
-
+       guipdfsapl.py
+       
 ## Tecnologias
 
 * **Python**
