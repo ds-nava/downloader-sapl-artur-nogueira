@@ -17,7 +17,7 @@ Ferramenta simples para baixar e unificar documentos em PDF do portal SAPL da CÃ
 3.  **Execute o programa:**
     * Ainda no terminal, execute:
         ```bash
-        python seu_script.py
+        guipdfsapl.py
         ```
     *(Lembre-se de substituir `seu_script.py` pelo nome real do seu arquivo)*.
 
