@@ -5,6 +5,8 @@ import re
 from PyPDF2 import PdfMerger
 from tkinter import messagebox
 import customtkinter as ctk
+import threading
+from io import BytesIO
 
 # CSV SAPL
 url = "https://sapl.arturnogueira.sp.leg.br/materia/pesquisar-materia?format=csv&tipo=&ementa=&numero=&numeracao__numero_materia=&numero_protocolo=&ano=&autoria__autor=&autoria__primeiro_autor=unknown&tipo_listagem=1"
@@ -37,6 +39,21 @@ def inserir_log(mensagem):
 def sanitize(texto):
     return re.sub(r'[\\/*?:"<>|]', "", str(texto))
 
+# Função para validar se o arquivo é um PDF válido
+def is_valid_pdf(content):
+    """Verifica se o conteúdo baixado é um PDF válido"""
+    if len(content) < 4:
+        return False
+    # PDFs começam com %PDF
+    return content[:4] == b'%PDF'
+
+# Função para atualizar barra de progresso
+def atualizar_progresso(atual, total):
+    progresso = atual / total
+    progress_bar.set(progresso)
+    progress_label.configure(text=f"{atual}/{total} arquivos ({int(progresso*100)}%)")
+    janela.update_idletasks()
+
 # Função que roda quando clicar no botão
 def baixar_pdfs(autor_entry, ano_entry, tipo_entry):
     
@@ -44,67 +61,142 @@ def baixar_pdfs(autor_entry, ano_entry, tipo_entry):
     if autor_entry.get() == "Selecione" or ano_entry.get() == "Selecione" or tipo_entry.get() == "Selecione":
         messagebox.showwarning("Aviso", "Selecione todos os filtros antes de prosseguir.")
         return
-        
-    # Limpa logs
-    log_textbox.configure(state="normal")
-    log_textbox.delete("1.0", "end")
-    log_textbox.configure(state="disabled")
     
-    # Pega valores dos filtros
-    autor = autor_entry.get()
-    ano = int(ano_entry.get())
-    tipo_materia = tipo_entry.get()
-      
-    # Filtragem
-    df_filtro = df[
-        (df['Autorias'].str.contains(autor, case=False, na=False)) &
-        (df['Ano'] == ano) &
-        (df['Tipo de Matéria Legislativa/Descrição'] == tipo_materia) &
-        (df['Tipo de Matéria Legislativa/Sigla'])
-    ].reset_index(drop=True)
-
-    # Verifica se encontrou resultados
-    if df_filtro.empty:
-        inserir_log("Nenhum resultado encontrado para os filtros selecionados.")
-        messagebox.showwarning("Aviso", "Nenhum resultado encontrado para os filtros selecionados.")
-        return    
-
-    # Cria coluna Nome dos arquivos
-    df_filtro["nome_arquivo"] = df_filtro.apply(
-        lambda row: f"{row['Tipo de Matéria Legislativa/Sigla']} - {row['Ano']} - {row['Número']}.pdf",
-        axis=1
+    # Desabilita botão durante o download
+    botao.configure(state="disabled", text="Baixando...")
+    progress_bar.set(0)
+    progress_label.configure(text="Preparando...")
+    
+    # Executa download em thread separada para não travar a interface
+    thread = threading.Thread(
+        target=executar_download, 
+        args=(autor_entry.get(), int(ano_entry.get()), tipo_entry.get()),
+        daemon=True
     )
+    thread.start()
 
-    # Pasta para salvar PDFs
-    pasta_download = sanitize(f"{tipo_materia} - {ano} - {autor}")
-    os.makedirs(pasta_download, exist_ok=True)
+# Função que executa o download em thread separada
+def executar_download(autor, ano, tipo_materia):
+    try:
+        # Limpa logs
+        log_textbox.configure(state="normal")
+        log_textbox.delete("1.0", "end")
+        log_textbox.configure(state="disabled")
+        
+        # Filtragem
+        df_filtro = df[
+            (df['Autorias'].str.contains(autor, case=False, na=False)) &
+            (df['Ano'] == ano) &
+            (df['Tipo de Matéria Legislativa/Descrição'] == tipo_materia) &
+            (df['Tipo de Matéria Legislativa/Sigla'])
+        ].reset_index(drop=True)
 
-    # Mesclador
-    merger = PdfMerger()
+        # Verifica se encontrou resultados
+        if df_filtro.empty:
+            inserir_log("Nenhum resultado encontrado para os filtros selecionados.")
+            messagebox.showwarning("Aviso", "Nenhum resultado encontrado para os filtros selecionados.")
+            botao.configure(state="normal", text="Baixar PDFs")
+            return    
 
-    inserir_log(f"Iniciando download... ")
+        # Cria coluna Nome dos arquivos
+        df_filtro["nome_arquivo"] = df_filtro.apply(
+            lambda row: f"{row['Tipo de Matéria Legislativa/Sigla']} - {row['Ano']} - {row['Número']}.pdf",
+            axis=1
+        )
 
-    # Loop de download e mesclagem
-    for i, row in df_filtro.iterrows():
-        url_pdf = row["Texto Original"]
-        nome_arquivo = sanitize(row["nome_arquivo"])
-        caminho_arquivo = os.path.join(pasta_download, nome_arquivo)
-        inserir_log(f"Baixando {i+1}/{len(df_filtro)}: {url_pdf} -> {nome_arquivo}")
-        r = requests.get(url_pdf)
-        with open(caminho_arquivo, "wb") as f:
-            f.write(r.content)
-        merger.append(caminho_arquivo)    
+        # Pasta para salvar PDFs
+        pasta_download = sanitize(f"{tipo_materia} - {ano} - {autor}")
+        os.makedirs(pasta_download, exist_ok=True)
+
+        # Mesclador
+        merger = PdfMerger()
+
+        inserir_log(f"Iniciando download de {len(df_filtro)} arquivo(s)...")
+        
+        arquivos_baixados = 0
+        arquivos_com_erro = 0
+
+        # Loop de download e mesclagem
+        for i, row in df_filtro.iterrows():
+            url_pdf = row["Texto Original"]
+            nome_arquivo = sanitize(row["nome_arquivo"])
+            caminho_arquivo = os.path.join(pasta_download, nome_arquivo)
+            
+            inserir_log(f"Baixando {i+1}/{len(df_filtro)}: {nome_arquivo}")
+            atualizar_progresso(i, len(df_filtro))
+            
+            try:
+                # Configura timeout e headers apropriados
+                r = requests.get(url_pdf, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+                r.raise_for_status()  # Levanta exceção se status != 200
+                
+                # Valida se é um PDF válido
+                if not is_valid_pdf(r.content):
+                    inserir_log(f"  ⚠️ Arquivo não é um PDF válido: {nome_arquivo}")
+                    arquivos_com_erro += 1
+                    continue
+                
+                # Salva o arquivo
+                with open(caminho_arquivo, "wb") as f:
+                    f.write(r.content)
+                
+                # Adiciona ao mesclador
+                merger.append(caminho_arquivo)
+                arquivos_baixados += 1
+                inserir_log(f"  ✓ Baixado com sucesso!")
+                
+            except requests.exceptions.Timeout:
+                inserir_log(f"  ❌ Erro: Timeout ao baixar {nome_arquivo}")
+                arquivos_com_erro += 1
+            except requests.exceptions.HTTPError as e:
+                inserir_log(f"  ❌ Erro HTTP {e.response.status_code}: {nome_arquivo}")
+                arquivos_com_erro += 1
+            except requests.exceptions.RequestException as e:
+                inserir_log(f"  ❌ Erro de conexão: {nome_arquivo}")
+                arquivos_com_erro += 1
+            except Exception as e:
+                inserir_log(f"  ❌ Erro ao processar {nome_arquivo}: {str(e)}")
+                arquivos_com_erro += 1
+        
+        # Atualiza progresso final
+        atualizar_progresso(len(df_filtro), len(df_filtro))
+        
+        # Verifica se há PDFs para mesclar
+        if arquivos_baixados == 0:
+            inserir_log("⚠️ Nenhum PDF válido foi baixado.")
+            messagebox.showwarning("Aviso", "Nenhum PDF válido foi baixado.")
+            botao.configure(state="normal", text="Baixar PDFs")
+            return
        
-    # PDF final
-    nome_arquivo_final = sanitize(f"{tipo_materia} - {ano} - {autor}.pdf")
-    arquivo_final = os.path.join(pasta_download, nome_arquivo_final)
-    merger.write(arquivo_final)
-    merger.close()
+        # PDF final
+        nome_arquivo_final = sanitize(f"{tipo_materia} - {ano} - {autor}.pdf")
+        arquivo_final = os.path.join(pasta_download, nome_arquivo_final)
+        
+        inserir_log("Mesclando PDFs...")
+        merger.write(arquivo_final)
+        merger.close()
 
-    # Finalizado
-    inserir_log("Download e mesclagem concluídos.")
-    inserir_log(f"PDF unificado salvo em: {arquivo_final}")
-    messagebox.showinfo("Sucesso", f"- PDF unificado salvo em: {arquivo_final}")
+        # Finalizado
+        inserir_log(f"✓ Download concluído!")
+        inserir_log(f"✓ {arquivos_baixados} arquivo(s) baixado(s) com sucesso")
+        if arquivos_com_erro > 0:
+            inserir_log(f"⚠️ {arquivos_com_erro} arquivo(s) com erro")
+        inserir_log(f"✓ PDF unificado salvo em: {arquivo_final}")
+        
+        messagebox.showinfo("Sucesso", 
+            f"Download concluído!\n\n"
+            f"✓ {arquivos_baixados} arquivo(s) baixado(s)\n"
+            f"{'⚠️ ' + str(arquivos_com_erro) + ' arquivo(s) com erro' if arquivos_com_erro > 0 else ''}\n\n"
+            f"PDF unificado salvo em:\n{arquivo_final}"
+        )
+        
+    except Exception as e:
+        inserir_log(f"❌ Erro crítico: {str(e)}")
+        messagebox.showerror("Erro", f"Erro ao processar: {str(e)}")
+    
+    finally:
+        # Reabilita botão
+        botao.configure(state="normal", text="Baixar PDFs")
 
 # Interface
 ctk.set_appearance_mode("dark")
@@ -149,12 +241,20 @@ botao = ctk.CTkButton(
 )
 botao.grid(row=3, column=0, columnspan=2, pady=(10,0))
 
+# Barra de progresso
+progress_label = ctk.CTkLabel(frame, text="")
+progress_label.grid(row=4, column=0, columnspan=2, pady=(10,0))
+
+progress_bar = ctk.CTkProgressBar(frame, width=550)
+progress_bar.grid(row=5, column=0, columnspan=2, pady=(5,10), padx=10)
+progress_bar.set(0)
+
 # Textbox para logs
 label_log = ctk.CTkLabel(frame, text="Download logs:")
-label_log.grid(row=4, column=0, columnspan=2, pady=(10,10))
+label_log.grid(row=6, column=0, columnspan=2, pady=(10,10))
 
 log_textbox = ctk.CTkTextbox(frame, width=550, height=100)
-log_textbox.grid(row=5, column=0, columnspan=2, pady=(0,10), padx=10)   
+log_textbox.grid(row=7, column=0, columnspan=2, pady=(0,10), padx=10)
 log_textbox.configure(state="disabled")
 
 janela.mainloop()
