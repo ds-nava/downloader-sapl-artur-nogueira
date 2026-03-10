@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import sys
 import os
 import re
 from PyPDF2 import PdfMerger
@@ -200,8 +201,18 @@ def executar_download(autor, ano, tipo_materia):
         botao.configure(state="normal", text="Baixar PDFs")
 
 # Interface
-base_dir = os.path.dirname(os.path.abspath(__file__))
-icone_path = os.path.join(base_dir, "icon.ico")
+# Função para encontrar o caminho dos arquivos rodando como .py ou como .exe
+def resource_path(relative_path):
+    try:
+        # O PyInstaller cria uma pasta temporária e salva o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+# Atualiza a chamada do ícone
+icone_path = resource_path("icon.ico")
 
 if os.name == "nt":
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sapl.gui.pdf")
@@ -211,6 +222,7 @@ ctk.set_default_color_theme("dark-blue")
 
 janela = ctk.CTk()
 janela.title("Download de PDFs SAPL")
+
 if os.path.exists(icone_path):
     janela.iconbitmap(icone_path)
 
