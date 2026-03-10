@@ -1,0 +1,15 @@
+# Arquivos gerados pelo script (Downloads SAPL)
+*.pdf
+*.csv
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+env/
+.venv/
+
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
