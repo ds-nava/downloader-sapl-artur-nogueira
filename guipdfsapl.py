@@ -6,6 +6,7 @@ from PyPDF2 import PdfMerger
 from tkinter import messagebox
 import customtkinter as ctk
 import threading
+import ctypes
 from io import BytesIO
 
 # CSV SAPL
@@ -199,12 +200,19 @@ def executar_download(autor, ano, tipo_materia):
         botao.configure(state="normal", text="Baixar PDFs")
 
 # Interface
+base_dir = os.path.dirname(os.path.abspath(__file__))
+icone_path = os.path.join(base_dir, "icon.ico")
+
+if os.name == "nt":
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sapl.gui.pdf")
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
 janela = ctk.CTk()
 janela.title("Download de PDFs SAPL")
-janela.iconbitmap("icon.ico")
+if os.path.exists(icone_path):
+    janela.iconbitmap(icone_path)
 
 frame = ctk.CTkFrame(janela)
 frame.pack(pady=20, padx=20)
