@@ -13,3 +13,7 @@ env/
 Thumbs.db
 ehthumbs.db
 $RECYCLE.BIN/
+
+build/
+dist/
+*.spec
